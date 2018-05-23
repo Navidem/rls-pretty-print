@@ -1,0 +1,7 @@
+[package]
+name = "rls-pretty-print"
+version = "0.1.0"
+authors = ["nemamdoost"]
+
+[dependencies]
+rls-analysis = "0.12"
