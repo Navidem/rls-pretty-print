@@ -1,21 +1,41 @@
 extern crate rls_analysis;
-use std::path;
-use rls_analysis::AnalysisLoader;
+use std::{path, env};
+//use rls_analysis::AnalysisLoader;
+use rls_analysis::{AnalysisHost};
+
 fn main() -> Result< (), Box<std::error::Error> >{
-
-    test();
-
+    let args: Vec<String> = env::args().collect();
    // let mut ld = rls_analysis::CargoAnalysisLoader::new(rls_analysis::Target::Debug);
    // ld.set_path_prefix(path::Path::new("."));
     //let host = ld.fresh_host();
-
+    //type Blacklist<'a> = &'a [&'static str];
     let analysis = rls_analysis::AnalysisHost::new(rls_analysis::Target::Debug);
-    let _roots = analysis.def_roots()?;
+    let path = path::Path::new(&args[1]);
+    println!("Wroking path: {:?}", path);
+    //let blacklist : Blacklist;
+    //analysis.reload_with_blacklist(path, path, &bckList);
+    //analysis.reload_from_analysis(std::vec::Vec<rls_data::Analysis>, path, path, blacklist);
+
+    //path_prefix: Cargo's working directory and will contain the target directory
+    //base_dir: is the root of the whole workspace
+    analysis.reload(path, path)?;
+    let roots = analysis.def_roots()?;
+
+    //println!("{:?}",roots );
+    for (id, _membr_name) in roots {
+        let def = analysis.get_def(id)?;
+        traverse(id, def , &analysis, 0)?;
+    }
     Ok(())
 
 }
 
-fn test () -> i32{
-    let i = 2;
-    return i
+fn traverse(id: rls_analysis::Id, defin: rls_analysis::Def ,analysis: &AnalysisHost, mut indent: u32) -> Result < (), Box<std::error::Error>> {
+    println!("{} {:?} {:?} {:?}", " ".repeat(indent as usize), id, defin.kind, defin.name);
+    indent += 2;
+    let children = analysis.for_each_child_def(id, |id, def| (id, def.clone()) )?;
+    for (child, def) in children {
+        traverse(child, def,  analysis, indent)?;
+    }
+    Ok(())
 }
