@@ -23,9 +23,9 @@ pub fn main() -> Result< (), Box<std::error::Error> >{
     //path_prefix: Cargo's working directory and will contain the target directory
     //base_dir: is the root of the whole workspace
     analysis.reload(path, path)?;
-    let roots = analysis.def_roots()?;
+    let mut roots = analysis.def_roots()?;
+    roots.sort_unstable_by(|(_, name1), (_, name2)| name1.cmp(name2));
 
-    //println!("{:?}",roots );
     for (id, membr_name) in roots {
         let def = analysis.get_def(id)?;
         println!("Root: {:?} {:?} {:?} {}", id, def.kind, def.name, membr_name );
@@ -39,7 +39,8 @@ fn traverse(id: rls_analysis::Id, defin: rls_analysis::Def ,analysis: &AnalysisH
     -> Result < (), Box<std::error::Error>> {
     println!("{} {:?} {:?} {:?}", " ".repeat(indent as usize), id, defin.kind, defin.name);
     indent += 2;
-    let children = analysis.for_each_child_def(id, |id, def| (id, def.clone()) )?;
+    let mut children = analysis.for_each_child_def(id, |id, def| (id, def.clone()) )?;
+    children.sort_unstable_by(|(_, def1), (_, def2)| def1.name.cmp(&def2.name));
     for (child, def) in children {
         traverse(child, def,  analysis, indent)?;
     }
