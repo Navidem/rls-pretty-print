@@ -1,6 +1,11 @@
 extern crate rls_analysis;
+extern crate rls_data; 
+extern crate rls_pretty_print;
+extern crate serde_json;
+
 use std::{path, env};
-//use rls_analysis::AnalysisLoader;
+use std::process::{Command, Stdio};
+
 use rls_analysis::{AnalysisHost};
 
 pub fn main() -> Result< (), Box<std::error::Error> >{
@@ -22,6 +27,8 @@ pub fn main() -> Result< (), Box<std::error::Error> >{
 
     //path_prefix: Cargo's working directory and will contain the target directory
     //base_dir: is the root of the whole workspace
+
+    generate_analysis_files(path)?;  // necessary to create the save-analysis dir
     analysis.reload(path, path)?;
     let mut roots = analysis.def_roots()?;
     roots.sort_unstable_by(|(_, name1), (_, name2)| name1.cmp(name2));
@@ -32,6 +39,8 @@ pub fn main() -> Result< (), Box<std::error::Error> >{
         traverse(id, def , &analysis, 0)?;
     }
     Ok(())
+
+
 
 }
 
@@ -45,4 +54,40 @@ fn traverse(id: rls_analysis::Id, defin: rls_analysis::Def ,analysis: &AnalysisH
         traverse(child, def,  analysis, indent)?;
     }
     Ok(())
+}
+
+fn generate_analysis_files(dir : &path::Path) -> Result <(), Box<std::error::Error> >{
+    let mut command = Command::new("cargo");
+
+    let target_dir = dir.join("target").join("rls");
+
+
+
+    command
+        .env("RUSTFLAGS", "-Z save-analysis")
+        .env("CARGO_TARGET_DIR", target_dir)
+        .stderr(Stdio::piped())
+        .stdout(Stdio::null());
+    
+    command.current_dir(dir);
+   /*  match target.kind {
+        TargetKind::Library => {
+            command.arg("--lib");
+        }
+        TargetKind::Binary => {
+            command.args(&["--bin", &target.name]);
+        }
+    } */
+    command.args(&["rustc", "--lib", "--", "-Z", "save-analysis"]);
+    let mut child = command.spawn()?;
+
+    let status = child.wait()?;
+
+    if !status.success() {
+        println!("ERROR!" );
+        println!("{:?}", command );        
+        println!("rustc process spawned: {:?}", status);
+    }
+    Ok(())
+
 }
