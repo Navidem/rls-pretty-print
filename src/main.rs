@@ -6,7 +6,7 @@ extern crate serde_json;
 use std::{path, env};
 use std::process::{Command, Stdio};
 
-use rls_analysis::{AnalysisHost};
+use rls_analysis::{AnalysisHost, DefKind};
 
 pub fn main() -> Result< (), Box<std::error::Error> >{
     let args: Vec<String> = env::args().collect();
@@ -46,7 +46,13 @@ pub fn main() -> Result< (), Box<std::error::Error> >{
 
 fn traverse(id: rls_analysis::Id, defin: rls_analysis::Def ,analysis: &AnalysisHost, mut indent: u32) 
     -> Result < (), Box<std::error::Error>> {
-    println!("{} {:?} {:?} {:?}", " ".repeat(indent as usize), id, defin.kind, defin.name);
+    println!("{}{:?} {:?} {:?}", " ".repeat(indent as usize), id, defin.kind, defin.name);
+    match defin.kind {
+        DefKind::Function 
+        | DefKind::Method => { println!("{}Qualname: {} ", " ".repeat(indent as usize +2), defin.qualname );
+            println!("{}Signature: {}", " ".repeat(indent as usize+2), defin.value); },
+        _ => (),
+    }
     indent += 2;
     let mut children = analysis.for_each_child_def(id, |id, def| (id, def.clone()) )?;
     children.sort_unstable_by(|(_, def1), (_, def2)| def1.name.cmp(&def2.name));
@@ -79,6 +85,7 @@ fn generate_analysis_files(dir : &path::Path) -> Result <(), Box<std::error::Err
         }
     } */
     command.args(&["rustc", "--lib", "--", "-Z", "save-analysis"]);
+    println!("Generating rls analysis data ...");
     let mut child = command.spawn()?;
 
     let status = child.wait()?;
