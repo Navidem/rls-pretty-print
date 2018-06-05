@@ -4,4 +4,6 @@ version = "0.1.0"
 authors = ["nemamdoost"]
 
 [dependencies]
-rls-analysis = "0.12"
+rls-analysis = {path = "/Users/nemamdoost/project/rls-analysis"}
+rls-data = {version = "0.16.0", features = ["serialize-serde"] }
+serde_json = "1.0.18"
