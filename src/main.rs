@@ -1,30 +1,22 @@
 extern crate rls_analysis;
 extern crate rls_data; 
-extern crate rls_pretty_print; //?? remvove it!
 extern crate serde_json;
 
-use std::{path, env};
+use std::{path::Path, env};
 use std::process::{Command, Stdio};
+use std::io::{Error, ErrorKind};
 
 use rls_analysis::{AnalysisHost, DefKind};
 use rls_data::config::Config as AnalysisConfig;
 
 pub fn main() -> Result< (), Box<std::error::Error> >{
     let args: Vec<String> = env::args().collect();
-    //println!("args len: {}",args.len() );
-   // let mut ld = rls_analysis::CargoAnalysisLoader::new(rls_analysis::Target::Debug);
-   // ld.set_path_prefix(path::Path::new("."));
-    //let host = ld.fresh_host();
-    //type Blacklist<'a> = &'a [&'static str];
     let analysis = rls_analysis::AnalysisHost::new(rls_analysis::Target::Debug);
-    let mut path = path::Path::new(".");
+    let mut path = Path::new(".");
     if args.len() > 1 {
-        path = path::Path::new(&args[1]);
+        path = Path::new(&args[1]);
     } 
     println!("Wroking path: {:?}", path);
-    //let blacklist : Blacklist;
-    //analysis.reload_with_blacklist(path, path, &bckList);
-    //analysis.reload_from_analysis(std::vec::Vec<rls_data::Analysis>, path, path, blacklist);
 
     //path_prefix: Cargo's working directory and will contain the target directory
     //base_dir: is the root of the whole workspace
@@ -43,7 +35,7 @@ pub fn main() -> Result< (), Box<std::error::Error> >{
 
 }
 
-fn traverse(id: rls_analysis::Id, defin: rls_analysis::Def , analysis: &AnalysisHost, mut indent: u32) 
+pub fn traverse(id: rls_analysis::Id, defin: rls_analysis::Def , analysis: &AnalysisHost, mut indent: u32) 
     -> Result < (), Box<std::error::Error>> {
     println!("{}{:?} {:?} {:?}", " ".repeat(indent as usize), id, defin.kind, defin.name);
     match defin.kind {
@@ -60,7 +52,7 @@ fn traverse(id: rls_analysis::Id, defin: rls_analysis::Def , analysis: &Analysis
     Ok(())
 }
 
-fn emit_sig (analysis: &AnalysisHost, defin: &rls_analysis::Def, indent: &u32) -> Result < (), Box<std::error::Error>>{
+pub fn emit_sig (analysis: &AnalysisHost, defin: &rls_analysis::Def, indent: &u32) -> Result < (), Box<std::error::Error>>{
     let def = defin.clone();
     println!("{}Qualname: {} ", " ".repeat(*indent as usize +2), def.qualname );
     match def.sig {
@@ -80,12 +72,14 @@ fn emit_sig (analysis: &AnalysisHost, defin: &rls_analysis::Def, indent: &u32) -
     }
     Ok(())
 }
-fn generate_analysis_files(dir : &path::Path) -> Result <(), Box<std::error::Error> >{
+fn generate_analysis_files(dir : &Path) -> Result <(), Box<std::error::Error> >{
     let mut command = Command::new("cargo");
 
     let target_dir = dir.join("target").join("rls");
     let manifest_path = dir.join("Cargo.toml");
 
+    let metadata = retrieve_metadata(&manifest_path)?;
+    let target = target_from_metadata(&metadata)?;
     let analysis_config = AnalysisConfig {
         //full_docs: true,
        // pub_only: true,
@@ -106,16 +100,16 @@ fn generate_analysis_files(dir : &path::Path) -> Result <(), Box<std::error::Err
         .stdout(Stdio::null());
     
     //command.current_dir(dir);
-   /*  match target.kind {
+    match target.kind {
         TargetKind::Library => {
             command.arg("--lib");
         }
         TargetKind::Binary => {
             command.args(&["--bin", &target.name]);
         }
-    } */
+    } 
     //command.args(&["rustc", "--lib", "--", "-Z", "save-analysis"]);
-    command.arg("--lib");
+    //command.arg("--lib");
     println!("Generating rls analysis data ...");
     println!("{:?}", command );
     let mut child = command.spawn()?;
@@ -126,7 +120,130 @@ fn generate_analysis_files(dir : &path::Path) -> Result <(), Box<std::error::Err
         println!("ERROR!" );
         println!("{:?}", command );        
         println!("child process spawned: {:?}", status);
+        return Err(Box::new(Error::new(ErrorKind::Other, "Child Process error")))
     }
     Ok(())
 
+}
+ 
+///codes from doxidize
+pub fn retrieve_metadata(manifest_path: &Path) -> Result<serde_json::Value,  Box<std::error::Error>> {
+    let output = Command::new("cargo")
+        .arg("metadata")
+        .arg("--manifest-path")
+        .arg(manifest_path)
+        .arg("--no-deps")
+        .arg("--format-version")
+        .arg("1")
+        .output()?;
+
+    if !output.status.success() {
+        println!("ERROR!" );
+        println!("{:?}", output );  
+        //return Err();
+    }
+
+    Ok(serde_json::from_slice(&output.stdout)?)
+}
+
+
+/// Parse the library target from the crate metadata.
+pub fn target_from_metadata(metadata: &serde_json::Value) -> Result<Target, Box<std::error::Error>> {
+    // We can expect at least one package and target, otherwise the metadata generation would have
+    // failed.
+    let targets = metadata["packages"][0]["targets"]
+        .as_array()
+        .expect("`targets` is not an array");
+
+    let mut targets = targets
+        .into_iter()
+        .flat_map(|target| {
+            let name = target["name"].as_str().expect("`name` is not a string");
+            let kinds = target["kind"].as_array().expect("`kind` is not an array");
+
+            if kinds.len() != 1 {
+                println!("expected one kind for target '{}'", name);
+                return Some(Err(Error::new(ErrorKind::Other, "OOps!")));
+            }
+
+            let kind = match kinds[0].as_str().unwrap() {
+                "lib" => TargetKind::Library,
+                "bin" => TargetKind::Binary,
+                _ => return None,
+            };
+
+            let target = Target {
+                name: name.to_owned(),
+                kind,
+            };
+
+            Some(Ok(target))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    if targets.is_empty() {
+        println!("no targets with supported kinds (`bin`, `lib`) found" );
+        Err(Box::new(Error::new(ErrorKind::Other, "OOps!")))
+    } else if targets.len() == 1 {
+        Ok(targets.remove(0))
+    } else {
+        // FIXME(#105): Handle more than one target.
+        let (mut libs, mut bins): (Vec<_>, Vec<_>) =
+            targets.into_iter().partition(|target| match target.kind {
+                TargetKind::Library => true,
+                TargetKind::Binary => false,
+            });
+
+        // Default to documenting the library if it exists.
+        let target = if !libs.is_empty() {
+            libs.remove(0)
+        } else {
+            bins.remove(0)
+        };
+
+        let kind = match target.kind {
+            TargetKind::Library => "library",
+            TargetKind::Binary => "first binary",
+        };
+
+        println!(
+            "Found more than one target to document. Documenting the {}: {}", kind, target.name
+        );
+
+        Ok(target)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum TargetKind {
+    /// A `bin` target.
+    Binary,
+
+    /// A `lib` target.
+    Library,
+}
+
+
+/// A target of documentation.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Target {
+    /// The kind of the target.
+    pub kind: TargetKind,
+
+    /// The name of the target.
+    ///
+    /// This is *not* the name of the target's crate, which is used to retrieve the analysis data.
+    /// Use the [`crate_name`] method instead.
+    ///
+    /// [`crate_name`]: ./struct.Target.html#method.crate_name
+    pub name: String,
+}
+
+impl Target {
+    /// Returns the name of the target's crate.
+    ///
+    /// This name is equivalent to the target's name, with dashes replaced by underscores.
+    pub fn crate_name(&self) -> String {
+        self.name.replace('-', "_")
+    }
 }
